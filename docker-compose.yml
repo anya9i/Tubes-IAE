@@ -1,0 +1,161 @@
+services:
+  # ===================================================
+  # 1. DATABASE MENU (MYSQL)
+  # ===================================================
+  menu-db:
+    image: mysql:8.4
+    container_name: menu-db
+    environment:
+      MYSQL_ROOT_PASSWORD: root_kantin_password
+      MYSQL_DATABASE: kantin_db
+      MYSQL_USER: kantin_user
+      MYSQL_PASSWORD: kantin_password
+    ports:
+      - "3308:3306"
+    volumes:
+      - kantin_menu_data:/var/lib/mysql
+    networks:
+      - microservice-network
+
+  menu-service:
+    build: ./menu-services
+    container_name: menu-services
+    ports:
+      - "3003:3003"
+    environment:
+      DB_HOST: menu-db
+      DB_NAME: kantin_db
+      DB_USER: kantin_user
+      DB_PASSWORD: kantin_password
+    depends_on:
+      - menu-db
+    networks:
+      - microservice-network
+
+  # ===================================================
+  # 2. DATABASE ORDER (MONGODB)
+  # ===================================================
+  order-db:
+    image: mongo:8
+    container_name: order-db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: kantin_admin
+      MONGO_INITDB_ROOT_PASSWORD: kantin_order_pass
+      MONGO_INITDB_DATABASE: kantin_order_db
+    ports:
+      - "27018:27017"
+    volumes:
+      - kantin_order_data:/data/db
+    networks:
+      - microservice-network
+
+  order-service:
+    build: ./order-service
+    container_name: order-service
+    ports:
+      - "3002:3002"
+    environment:
+      - MONGO_URI=mongodb://kantin_admin:kantin_order_pass@order-db:27017/kantin_order_db?authSource=admin
+    depends_on:
+      - order-db
+    networks:
+      - microservice-network
+
+  # ===================================================
+  # 3. DATABASE PAYMENT (MYSQL BARU)
+  # ===================================================
+  payment-db:
+    image: mysql:8.4
+    container_name: payment-db
+    environment:
+      MYSQL_ROOT_PASSWORD: root_payment_password
+      MYSQL_DATABASE: kantin_payment_db
+      MYSQL_USER: payment_user
+      MYSQL_PASSWORD: payment_pass
+    ports:
+      - "3309:3306" # Dipetakan ke port luar 3309
+    volumes:
+      - kantin_payment_data:/var/lib/mysql
+    networks:
+      - microservice-network
+
+  payment-service:
+    build: ./payment-service
+    container_name: payment-service
+    ports:
+      - "5000:5000"
+    environment:
+      - DB_HOST=payment-db
+      - DB_NAME=kantin_payment_db
+      - DB_USER=payment_user
+      - DB_PASSWORD=payment_pass
+    depends_on:
+      - payment-db
+    networks:
+      - microservice-network
+
+  # ===================================================
+  # 4. DATABASE REPORT (MYSQL BARU)
+  # ===================================================
+  report-db:
+    image: mysql:8.4
+    container_name: report-db
+    environment:
+      MYSQL_ROOT_PASSWORD: root_report_password
+      MYSQL_DATABASE: report_db
+      MYSQL_USER: report_user
+      MYSQL_PASSWORD: report_password
+    ports:
+      - "3310:3306" # Dipetakan ke port luar 3310
+    volumes:
+      - kantin_report_data:/var/lib/mysql
+    networks:
+      - microservice-network
+
+  report-service:
+    build: ./report-services
+    container_name: report-service
+    ports:
+      - "8000:8000"
+    environment:
+      DB_HOST: report-db
+      DB_NAME: report_db
+      DB_USER: report_user
+      DB_PASSWORD: report_password
+      ORDER_SERVICE_URL: http://order-service:3002
+      PAYMENT_SERVICE_URL: http://payment-service:5000
+    depends_on:
+      - report-db
+    networks:
+      - microservice-network
+
+  # ===================================================
+  # 5. GERBANG UTAMA: API GATEWAY
+  # ===================================================
+  api-gateway:
+    build: ./api.gateway
+    container_name: api-gateway
+    ports:
+      - "3000:3000"
+    environment:
+      - MENU_SERVICE_URL=http://menu-service:3003
+      - ORDER_SERVICE_URL=http://order-service:3001
+      - PAYMENT_SERVICE_URL=http://payment-service:5000
+      - REPORT_SERVICE_URL=http://report-service:3002
+    depends_on:
+      - menu-service
+      - order-service
+      - payment-service
+      - report-service
+    networks:
+      - microservice-network
+
+volumes:
+  kantin_menu_data:
+  kantin_order_data:
+  kantin_payment_data:
+  kantin_report_data:
+
+networks:
+  microservice-network:
+    driver: bridge
