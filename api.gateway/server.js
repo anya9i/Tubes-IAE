@@ -131,20 +131,100 @@ app.post("/orders", async (req, res) => {
 });
 
 // =========================================================================
-// 3. ENDPOINT KATEGORI: PAYMENT SERVICE (PYTHON FLASK + MYSQL)
+// 3. ENDPOINT KATEGORI: PAYMENT SERVICE (NODE.JS + MYSQL)
 // =========================================================================
 
 app.get("/payments", async (req, res) => {
   try {
     const response = await fetch(`${PAYMENT_SERVICE_URL}/payments`);
     const data = await response.json();
-    res.json({
-      gateway: "api-gateway",
-      source: "payment-service",
-      result: data
-    });
+    res.json({ gateway: "api-gateway", source: "payment-service", result: data });
   } catch (error) {
     res.status(500).json({ message: "Gagal menghubungi Payment Service", error: error.message });
+  }
+});
+
+app.get("/payments/summary", async (req, res) => {
+  try {
+    const response = await fetch(`${PAYMENT_SERVICE_URL}/payments/summary`);
+    const data = await response.json();
+    res.json({ gateway: "api-gateway", source: "payment-service", result: data });
+  } catch (error) {
+    res.status(500).json({ message: "Gagal mengambil summary payment", error: error.message });
+  }
+});
+
+app.get("/payments/order/:order_id", async (req, res) => {
+  try {
+    const response = await fetch(`${PAYMENT_SERVICE_URL}/payments/order/${req.params.order_id}`);
+    const data = await response.json();
+    res.json({ gateway: "api-gateway", source: "payment-service", result: data });
+  } catch (error) {
+    res.status(500).json({ message: "Gagal mengambil payment by order", error: error.message });
+  }
+});
+
+app.get("/payments/:id", async (req, res) => {
+  try {
+    const response = await fetch(`${PAYMENT_SERVICE_URL}/payments/${req.params.id}`);
+    const data = await response.json();
+    res.json({ gateway: "api-gateway", source: "payment-service", result: data });
+  } catch (error) {
+    res.status(500).json({ message: "Gagal mengambil detail payment", error: error.message });
+  }
+});
+
+app.post("/payments", async (req, res) => {
+  try {
+    const response = await fetch(`${PAYMENT_SERVICE_URL}/payments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body)
+    });
+    const data = await response.json();
+    res.json({ gateway: "api-gateway", source: "payment-service", result: data });
+  } catch (error) {
+    res.status(500).json({ message: "Gagal membuat payment", error: error.message });
+  }
+});
+
+app.patch("/payments/:id/confirm", async (req, res) => {
+  try {
+    const response = await fetch(`${PAYMENT_SERVICE_URL}/payments/${req.params.id}/confirm`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body)
+    });
+    const data = await response.json();
+    res.json({ gateway: "api-gateway", source: "payment-service", result: data });
+  } catch (error) {
+    res.status(500).json({ message: "Gagal konfirmasi payment", error: error.message });
+  }
+});
+
+app.patch("/payments/:id/cancel", async (req, res) => {
+  try {
+    const response = await fetch(`${PAYMENT_SERVICE_URL}/payments/${req.params.id}/cancel`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body)
+    });
+    const data = await response.json();
+    res.json({ gateway: "api-gateway", source: "payment-service", result: data });
+  } catch (error) {
+    res.status(500).json({ message: "Gagal batalkan payment", error: error.message });
+  }
+});
+
+app.delete("/payments/:id", async (req, res) => {
+  try {
+    const response = await fetch(`${PAYMENT_SERVICE_URL}/payments/${req.params.id}`, {
+      method: "DELETE"
+    });
+    const data = await response.json();
+    res.json({ gateway: "api-gateway", source: "payment-service", result: data });
+  } catch (error) {
+    res.status(500).json({ message: "Gagal hapus payment", error: error.message });
   }
 });
 

@@ -53,9 +53,9 @@ services:
     build: ./order-service
     container_name: order-service
     ports:
-      - "3002:3002"
+      - "3001:3001"
     environment:
-      - PORT=3002
+      - PORT=3001
       - MONGO_URL=mongodb://kantin_admin:kantin_order_pass@order-db:27017/kantin_order_db?authSource=admin
     depends_on:
       - order-db
@@ -63,7 +63,7 @@ services:
       - microservice-network
 
   # ===================================================
-  # 3. DATABASE PAYMENT (MYSQL BARU)
+  # 3. DATABASE PAYMENT (MYSQL)
   # ===================================================
   payment-db:
     image: mysql:8.4
@@ -74,42 +74,49 @@ services:
       MYSQL_USER: payment_user
       MYSQL_PASSWORD: payment_pass
     ports:
-      - "3309:3306" # Dipetakan ke port luar 3309
+      - "3309:3306"
     volumes:
       - kantin_payment_data:/var/lib/mysql
     networks:
       - microservice-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot_payment_password"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   payment-service:
     build: ./payment-service
     container_name: payment-service
     ports:
-      - "5000:3004"
+      - "3004:3004"
     environment:
+      - PORT=3004
       - DB_HOST=payment-db
       - DB_NAME=kantin_payment_db
       - DB_USER=payment_user
       - DB_PASSWORD=payment_pass
+      - ORDER_SERVICE_URL=http://order-service:3001
     depends_on:
-      - payment-db
+      payment-db:
+        condition: service_healthy
     networks:
       - microservice-network
 
   # ===================================================
-  # 4. DATABASE REPORT (MYSQL BARU)
+  # 4. DATABASE REPORT (POSTGRESQL)
   # ===================================================
   report-db:
-    image: mysql:8.4
+    image: postgres:15
     container_name: report-db
     environment:
-      MYSQL_ROOT_PASSWORD: root_report_password
-      MYSQL_DATABASE: report_db
-      MYSQL_USER: report_user
-      MYSQL_PASSWORD: report_password
+      POSTGRES_USER: report_user
+      POSTGRES_PASSWORD: report_password
+      POSTGRES_DB: report_db
     ports:
-      - "3310:3306" # Dipetakan ke port luar 3310
+      - "5432:5432"
     volumes:
-      - kantin_report_data:/var/lib/mysql
+      - kantin_report_data:/var/lib/postgresql/data
     networks:
       - microservice-network
 
@@ -123,15 +130,16 @@ services:
       DB_NAME: report_db
       DB_USER: report_user
       DB_PASSWORD: report_password
-      ORDER_SERVICE_URL: http://order-service:3002
-      PAYMENT_SERVICE_URL: http://payment-service:5000
+      DB_PORT: 5432
+      ORDER_SERVICE_URL: http://order-service:3001
+      PAYMENT_SERVICE_URL: http://payment-service:3004
     depends_on:
       - report-db
     networks:
       - microservice-network
 
   # ===================================================
-  # 5. GERBANG UTAMA: API GATEWAY
+  # 5. API GATEWAY
   # ===================================================
   api-gateway:
     build: ./api.gateway
@@ -141,8 +149,8 @@ services:
     environment:
       - MENU_SERVICE_URL=http://menu-service:3003
       - ORDER_SERVICE_URL=http://order-service:3001
-      - PAYMENT_SERVICE_URL=http://payment-service:5000
-      - REPORT_SERVICE_URL=http://report-service:3002
+      - PAYMENT_SERVICE_URL=http://payment-service:3004
+      - REPORT_SERVICE_URL=http://report-service:8000
     depends_on:
       - menu-service
       - order-service

@@ -26,8 +26,8 @@ const sequelize = new Sequelize(
 // ── Model ─────────────────────────────────────────────────────────────────────
 const Payment = sequelize.define('Payment', {
   id:        { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-  order_id:  { type: DataTypes.INTEGER, allowNull: false },
-  user_id:   { type: DataTypes.INTEGER, allowNull: false },
+  order_id:  { type: DataTypes.STRING, allowNull: false },  // STRING karena MongoDB ID
+  user_id:   { type: DataTypes.STRING, allowNull: false },
   amount:    { type: DataTypes.DECIMAL(10, 2), allowNull: false },
   method:    { type: DataTypes.ENUM('cash', 'qris', 'transfer'), defaultValue: 'cash' },
   status:    { type: DataTypes.ENUM('pending', 'paid', 'failed'), defaultValue: 'pending' },
@@ -38,26 +38,27 @@ const Payment = sequelize.define('Payment', {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
+// Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'payment-service' });
+  res.json({ service: 'payment-service', database: 'mysql', status: 'running' });
 });
 
-// Buat payment baru
+// [FUNGSI 1] POST: Buat payment baru
 app.post('/payments', async (req, res) => {
   const { order_id, user_id, amount, method = 'cash', note } = req.body;
 
   if (!order_id || !user_id || !amount)
-    return res.status(400).json({ error: 'order_id, user_id, dan amount wajib diisi.' });
+    return res.status(400).json({ message: 'order_id, user_id, dan amount wajib diisi.' });
 
   if (!['cash', 'qris', 'transfer'].includes(method))
-    return res.status(400).json({ error: 'Method harus cash, qris, atau transfer.' });
+    return res.status(400).json({ message: 'Method harus cash, qris, atau transfer.' });
 
   try {
     const existing = await Payment.findOne({
       where: { order_id, status: { [Op.in]: ['pending', 'paid'] } },
     });
     if (existing)
-      return res.status(409).json({ error: 'Order ini sudah punya payment aktif.', payment: existing });
+      return res.status(409).json({ message: 'Order ini sudah punya payment aktif.', data: existing });
 
     const payment = await Payment.create({
       order_id, user_id, amount, method,
@@ -66,13 +67,13 @@ app.post('/payments', async (req, res) => {
       note: note || null,
     });
 
-    res.status(201).json({ message: 'Payment berhasil dibuat.', payment });
+    res.status(201).json({ service: 'payment-service', message: 'Payment berhasil dibuat.', data: payment });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: err.message });
   }
 });
 
-// Semua payment
+// [FUNGSI 2] GET: Semua payment
 app.get('/payments', async (req, res) => {
   try {
     const where = {};
@@ -81,13 +82,14 @@ app.get('/payments', async (req, res) => {
     if (req.query.user_id) where.user_id = req.query.user_id;
 
     const payments = await Payment.findAll({ where, order: [['created_at', 'DESC']] });
-    res.json({ total: payments.length, payments });
+    res.json({ service: 'payment-service', total: payments.length, data: payments });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: err.message });
   }
 });
 
-// Summary untuk report service
+// [FUNGSI 3] GET: Summary untuk report service
+// PENTING: taruh /payments/summary SEBELUM /payments/:id agar tidak bentrok
 app.get('/payments/summary', async (req, res) => {
   try {
     const revenue = await sequelize.query(
@@ -104,16 +106,20 @@ app.get('/payments/summary', async (req, res) => {
     );
 
     res.json({
-      total_revenue: parseFloat(revenue[0].total),
-      by_status: Object.fromEntries(byStatus.map(r => [r.status, parseInt(r.count)])),
-      by_method: Object.fromEntries(byMethod.map(r => [r.method, parseInt(r.count)])),
+      service: 'payment-service',
+      data: {
+        total_revenue: parseFloat(revenue[0].total),
+        by_status: Object.fromEntries(byStatus.map(r => [r.status, parseInt(r.count)])),
+        by_method: Object.fromEntries(byMethod.map(r => [r.method, parseInt(r.count)])),
+      }
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: err.message });
   }
 });
 
-// Payment by order_id
+// [FUNGSI 4] GET: Payment by order_id
+// PENTING: taruh /payments/order/:order_id SEBELUM /payments/:id
 app.get('/payments/order/:order_id', async (req, res) => {
   try {
     const payments = await Payment.findAll({
@@ -121,71 +127,84 @@ app.get('/payments/order/:order_id', async (req, res) => {
       order: [['created_at', 'DESC']],
     });
     if (!payments.length)
-      return res.status(404).json({ error: 'Tidak ada payment untuk order ini.' });
-    res.json({ payments });
+      return res.status(404).json({ message: 'Tidak ada payment untuk order ini.' });
+    res.json({ service: 'payment-service', data: payments });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: err.message });
   }
 });
 
-// Detail payment by id
+// [FUNGSI 5] GET: Detail payment by id
 app.get('/payments/:id', async (req, res) => {
   try {
     const payment = await Payment.findByPk(req.params.id);
-    if (!payment) return res.status(404).json({ error: 'Payment tidak ditemukan.' });
-    res.json({ payment });
+    if (!payment) return res.status(404).json({ message: 'Payment tidak ditemukan.' });
+    res.json({ service: 'payment-service', data: payment });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: err.message });
   }
 });
 
-// Konfirmasi bayar
+// [FUNGSI 6] PATCH: Konfirmasi bayar
 app.patch('/payments/:id/confirm', async (req, res) => {
   try {
     const payment = await Payment.findByPk(req.params.id);
-    if (!payment) return res.status(404).json({ error: 'Payment tidak ditemukan.' });
-    if (payment.status === 'paid') return res.status(400).json({ error: 'Sudah dikonfirmasi.' });
+    if (!payment) return res.status(404).json({ message: 'Payment tidak ditemukan.' });
+    if (payment.status === 'paid') return res.status(400).json({ message: 'Sudah dikonfirmasi.' });
 
     const { status = 'paid', note } = req.body;
     if (!['paid', 'failed'].includes(status))
-      return res.status(400).json({ error: "Status hanya boleh 'paid' atau 'failed'." });
+      return res.status(400).json({ message: "Status hanya boleh 'paid' atau 'failed'." });
 
     payment.status  = status;
     payment.paid_at = status === 'paid' ? new Date() : null;
     if (note) payment.note = note;
     await payment.save();
 
-    // Beritahu Order Service
+    // Notify Order Service — pakai PUT sesuai endpoint order service
     try {
-      await axios.patch(
-        `${ORDER_SERVICE_URL}/orders/${payment.order_id}/payment-status`,
-        { payment_status: status, payment_id: payment.id },
+      await axios.put(
+        `${ORDER_SERVICE_URL}/orders/${payment.order_id}`,
+        { status: status === 'paid' ? 'paid' : 'failed' },
         { timeout: 5000 }
       );
     } catch (e) {
       console.warn('[NOTIFY] Gagal notif Order Service:', e.message);
     }
 
-    res.json({ message: `Payment '${status}'.`, payment });
+    res.json({ service: 'payment-service', message: `Payment berhasil dikonfirmasi sebagai '${status}'.`, data: payment });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: err.message });
   }
 });
 
-// Batalkan payment
+// [FUNGSI 7] PATCH: Batalkan payment
 app.patch('/payments/:id/cancel', async (req, res) => {
   try {
     const payment = await Payment.findByPk(req.params.id);
-    if (!payment) return res.status(404).json({ error: 'Payment tidak ditemukan.' });
+    if (!payment) return res.status(404).json({ message: 'Payment tidak ditemukan.' });
     if (payment.status !== 'pending')
-      return res.status(400).json({ error: `Status '${payment.status}' tidak bisa dibatalkan.` });
+      return res.status(400).json({ message: `Status '${payment.status}' tidak bisa dibatalkan.` });
 
     payment.status = 'failed';
     await payment.save();
 
-    res.json({ message: 'Payment dibatalkan.', payment });
+    res.json({ service: 'payment-service', message: 'Payment berhasil dibatalkan.', data: payment });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// [FUNGSI 8] DELETE: Hapus payment
+app.delete('/payments/:id', async (req, res) => {
+  try {
+    const payment = await Payment.findByPk(req.params.id);
+    if (!payment) return res.status(404).json({ message: 'Payment tidak ditemukan.' });
+
+    await payment.destroy();
+    res.json({ service: 'payment-service', message: 'Payment berhasil dihapus.' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 });
 

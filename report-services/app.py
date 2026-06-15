@@ -3,7 +3,7 @@ import time
 import psycopg2
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request
-import requests
+import requests 
 
 app = Flask(__name__)
 
@@ -100,14 +100,19 @@ def health():
 def get_daily_report():
     try:
         date = request.args.get("date", datetime.now().strftime("%Y-%m-%d"))
-        
+
+       
         order_data = fetch_json(f"{ORDER_SERVICE_URL}/orders")
         payment_data = fetch_json(f"{PAYMENT_SERVICE_URL}/payments")
-        
-        total_orders = len(order_data.get("data", [])) if order_data else 0
-        total_revenue = sum(item.get("amount", 0) for item in payment_data.get("data", [])) if payment_data else 0
-        total_transactions = len(payment_data.get("data", [])) if payment_data else 0
-        
+
+    
+        order_list = order_data if isinstance(order_data, list) else (order_data.get("data", []) if order_data else [])
+        payment_list = payment_data if isinstance(payment_data, list) else (payment_data.get("data", []) if payment_data else [])
+
+        total_orders = len(order_list)
+        total_transactions = len(payment_list)
+        total_revenue = sum(item.get("amount", 0) for item in payment_list)
+
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO daily_reports (report_date, total_orders, total_revenue, total_payments)
@@ -117,21 +122,10 @@ def get_daily_report():
                 total_revenue = EXCLUDED.total_revenue,
                 total_payments = EXCLUDED.total_payments
         """, (date, total_orders, total_revenue, total_transactions))
+
         conn.commit()
-        
-        if order_data and "menu_sales" in order_data:
-            for menu in order_data["menu_sales"]:
-                cursor.execute("""
-                    INSERT INTO popular_menus (menu_name, total_sold, total_revenue, report_date)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (menu_name, report_date) DO UPDATE SET
-                        total_sold = EXCLUDED.total_sold,
-                        total_revenue = EXCLUDED.total_revenue
-                """, (menu["menu_name"], menu["data_sold"], menu["revenue"], date))
-            conn.commit()
-        
         cursor.close()
-        
+
         return jsonify({
             "service": "report-service",
             "date": date,
@@ -141,8 +135,12 @@ def get_daily_report():
                 "total_payments": total_transactions
             }
         })
+
     except Exception as error:
-        return jsonify({"message": "Gagal mengambil laporan harian", "error": str(error)}), 500
+        return jsonify({
+            "message": "Gagal mengambil laporan harian",
+            "error": str(error)
+        }), 500
 
 # [METHOD 3] GET: Menampilkan Data Ringkasan Mingguan
 @app.route("/report/weekly", methods=["GET"])
