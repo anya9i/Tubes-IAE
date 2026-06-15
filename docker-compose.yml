@@ -55,7 +55,8 @@ services:
     ports:
       - "3002:3002"
     environment:
-      - MONGO_URI=mongodb://kantin_admin:kantin_order_pass@order-db:27017/kantin_order_db?authSource=admin
+      - PORT=3002
+      - MONGO_URL=mongodb://kantin_admin:kantin_order_pass@order-db:27017/kantin_order_db?authSource=admin
     depends_on:
       - order-db
     networks:
@@ -83,7 +84,7 @@ services:
     build: ./payment-service
     container_name: payment-service
     ports:
-      - "5000:5000"
+      - "5000:3004"
     environment:
       - DB_HOST=payment-db
       - DB_NAME=kantin_payment_db
