@@ -136,6 +136,10 @@ app.delete("/orders/:id", async (req, res) => {
     }
 });
 
+app.get("/health", (req, res) => {
+    res.json({ service: "order-service", status: "running" });
+});
+
 /*
 RUN
 */

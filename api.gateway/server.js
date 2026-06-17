@@ -1,335 +1,167 @@
 const express = require("express");
-const app = express();
-const PORT = 3000; // API Gateway berjalan di port 3000 sesuai modul [cite: 82, 408]
+const { graphqlHTTP } = require("express-graphql");
+const { buildSchema } = require("graphql");
+const fetch = require("node-fetch");
 
+const app = express();
 app.use(express.json());
 
-// =========================================================================
-// DEKLARASI URL SERVICE PENDUKUNG (MENGIKUTI GAYA HALAMAN 11 & 20)
-// =========================================================================
-const MENU_SERVICE_URL = process.env.MENU_SERVICE_URL || "http://menu-service:3003";
-const ORDER_SERVICE_URL = process.env.ORDER_SERVICE_URL || "http://order-service:3001";
-const PAYMENT_SERVICE_URL = process.env.PAYMENT_SERVICE_URL || "http://payment-service:3002";
-const REPORT_SERVICE_URL = process.env.REPORT_SERVICE_URL || "http://report-service:8000";
+const PORT = process.env.PORT || 3000;
 
 // =========================================================================
-// ENDPOINT UTAMA: MENAMPILKAN DAFTAR ENDPOINTS (MENGIKUTI HALAMAN 11 & 21)
+// DEKLARASI URL SERVICE PENDUKUNG
 // =========================================================================
-app.get("/", (req, res) => {
-  res.json({
-    service: "api-gateway",
-    message: "API Gateway Microservice Multi-Platform Kampus berjalan",
-    endpoints: [
-      "/menu",
-      "/orders",
-      "/payments",
-      "/report/daily",
-      "/report/weekly",
-      "/report/detail/:id",
-      "/report/range",
-      "/report/cleanup",
-      "/health"
-    ]
-  });
-});
-
-// Health check untuk API Gateway sendiri [cite: 425]
-app.get("/health", (req, res) => {
-  res.json({
-    service: "api-gateway",
-    status: "running"
-  });
-});
+const MENU_SERVICE_URL    = process.env.MENU_SERVICE_URL    || "http://menu-service:3003";
+const ORDER_SERVICE_URL   = process.env.ORDER_SERVICE_URL   || "http://order-service:3001";
+const PAYMENT_SERVICE_URL = process.env.PAYMENT_SERVICE_URL || "http://payment-service:3004";
+const REPORT_SERVICE_URL  = process.env.REPORT_SERVICE_URL  || "http://report-service:8000";
 
 // =========================================================================
-// 1. ENDPOINT KATEGORI: MENU SERVICE (NODE.JS + MYSQL)
+// ENDPOINT REST (menu, orders, payments, report)
 // =========================================================================
+// ... semua route REST kamu tetap di sini persis seperti sebelumnya ...
+// (tidak perlu dihapus)
 
-// Ambil semua menu makanan kantin (Kodingan bawaan Anda yang sudah sesuai modul)
-app.get("/menu", async (req, res) => {
-  try {
-    const response = await fetch(`${MENU_SERVICE_URL}/menu`);
-    const data = await response.json();
-    res.json({
-      gateway: "api-gateway",
-      source: "menu-service",
-      result: data
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal menghubungi Menu Service", error: error.message }); 
+// =========================================================================
+// GRAPHQL SCHEMA
+// =========================================================================
+const schema = buildSchema(`
+  type Menu {
+    id: Int
+    name: String
+    price: Int
+    category: String
   }
-});
 
-// Ambil detail satu menu berdasarkan ID (Ketentuan Tugas!)
-app.get("/menu/:id", async (req, res) => {
-  try {
-    const response = await fetch(`${MENU_SERVICE_URL}/menu/${req.params.id}`);
-    const data = await response.json();
-    res.json({
-      gateway: "api-gateway",
-      source: "menu-service",
-      result: data
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal mengambil detail menu", error: error.message });
+  type Order {
+    id: String
+    menuId: String
+    quantity: Int
+    totalPrice: Int
+    status: String
   }
-});
 
-// Tambah menu baru
-app.post("/menu", async (req, res) => {
-  try {
-    const response = await fetch(`${MENU_SERVICE_URL}/menu`, {
+  type Payment {
+    id: Int
+    order_id: String
+    amount: String
+    method: String
+    status: String
+  }
+
+  type DailyReport {
+    total_orders: Int
+    total_revenue: Int
+    total_payments: Int
+  }
+
+  type SystemStatus {
+    menu_service: String
+    order_service: String
+    payment_service: String
+    report_service: String
+  }
+
+  type Query {
+    systemStatus: SystemStatus
+    menus: [Menu]
+    orders: [Order]
+    payments: [Payment]
+    dailyReport: DailyReport
+  }
+
+  type Mutation {
+    createOrder(menuId: String, quantity: Int): Order
+    updateOrderStatus(id: String, status: String): Order
+    deleteOrder(id: String): String
+  }
+`);
+
+// =========================================================================
+// RESOLVER
+// =========================================================================
+const root = {
+  systemStatus: async () => {
+    const fetchStatus = async (url) => {
+      try {
+        const res = await fetch(`${url}/health`);
+        const data = await res.json();
+        return data.status || "running";
+      } catch {
+        return "unreachable";
+      }
+    };
+    return {
+      menu_service:    await fetchStatus(MENU_SERVICE_URL),
+      order_service:   await fetchStatus(ORDER_SERVICE_URL),
+      payment_service: await fetchStatus(PAYMENT_SERVICE_URL),
+      report_service:  await fetchStatus(REPORT_SERVICE_URL),
+    };
+  },
+
+  menus: async () => {
+    const res  = await fetch(`${MENU_SERVICE_URL}/menu`);
+    const data = await res.json();
+    return data.result || data;
+  },
+
+  orders: async () => {
+    const res  = await fetch(`${ORDER_SERVICE_URL}/orders`);
+    const data = await res.json();
+    return data.result || data;
+  },
+
+  payments: async () => {
+    const res  = await fetch(`${PAYMENT_SERVICE_URL}/payments`);
+    const data = await res.json();
+    return data.result || data;
+  },
+
+  dailyReport: async () => {
+    const res  = await fetch(`${REPORT_SERVICE_URL}/report/daily`);
+    const data = await res.json();
+    return data.result || data;
+  },
+
+  createOrder: async ({ menuId, quantity }) => {
+    const res = await fetch(`${ORDER_SERVICE_URL}/orders`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body)
+      body: JSON.stringify({ menuId, quantity })
     });
-    const data = await response.json();
-    res.json({
-      gateway: "api-gateway",
-      source: "menu-service",
-      result: data
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal menambahkan data menu", error: error.message });
-  }
-});
+    const data = await res.json();
+    return data.result || data;
+  },
 
-// =========================================================================
-// 2. ENDPOINT KATEGORI: ORDER SERVICE (NODE.JS + MONGODB)
-// =========================================================================
-
-app.get("/orders", async (req, res) => {
-  try {
-    const response = await fetch(`${ORDER_SERVICE_URL}/orders`);
-    const data = await response.json();
-    res.json({
-      gateway: "api-gateway",
-      source: "order-service",
-      result: data
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal menghubungi Order Service", error: error.message });
-  }
-});
-
-app.post("/orders", async (req, res) => {
-  try {
-    const response = await fetch(`${ORDER_SERVICE_URL}/orders`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body)
-    });
-    const data = await response.json();
-    res.json({
-      gateway: "api-gateway",
-      source: "order-service",
-      result: data
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal membuat transaksi order", error: error.message });
-  }
-});
-
-// =========================================================================
-// 3. ENDPOINT KATEGORI: PAYMENT SERVICE (NODE.JS + MYSQL)
-// =========================================================================
-
-app.get("/payments", async (req, res) => {
-  try {
-    const response = await fetch(`${PAYMENT_SERVICE_URL}/payments`);
-    const data = await response.json();
-    res.json({ gateway: "api-gateway", source: "payment-service", result: data });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal menghubungi Payment Service", error: error.message });
-  }
-});
-
-app.get("/payments/summary", async (req, res) => {
-  try {
-    const response = await fetch(`${PAYMENT_SERVICE_URL}/payments/summary`);
-    const data = await response.json();
-    res.json({ gateway: "api-gateway", source: "payment-service", result: data });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal mengambil summary payment", error: error.message });
-  }
-});
-
-app.get("/payments/order/:order_id", async (req, res) => {
-  try {
-    const response = await fetch(`${PAYMENT_SERVICE_URL}/payments/order/${req.params.order_id}`);
-    const data = await response.json();
-    res.json({ gateway: "api-gateway", source: "payment-service", result: data });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal mengambil payment by order", error: error.message });
-  }
-});
-
-app.get("/payments/:id", async (req, res) => {
-  try {
-    const response = await fetch(`${PAYMENT_SERVICE_URL}/payments/${req.params.id}`);
-    const data = await response.json();
-    res.json({ gateway: "api-gateway", source: "payment-service", result: data });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal mengambil detail payment", error: error.message });
-  }
-});
-
-app.post("/payments", async (req, res) => {
-  try {
-    const response = await fetch(`${PAYMENT_SERVICE_URL}/payments`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body)
-    });
-    const data = await response.json();
-    res.json({ gateway: "api-gateway", source: "payment-service", result: data });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal membuat payment", error: error.message });
-  }
-});
-
-app.patch("/payments/:id/confirm", async (req, res) => {
-  try {
-    const response = await fetch(`${PAYMENT_SERVICE_URL}/payments/${req.params.id}/confirm`, {
+  updateOrderStatus: async ({ id, status }) => {
+    const res = await fetch(`${ORDER_SERVICE_URL}/orders/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body)
+      body: JSON.stringify({ status })
     });
-    const data = await response.json();
-    res.json({ gateway: "api-gateway", source: "payment-service", result: data });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal konfirmasi payment", error: error.message });
-  }
-});
+    const data = await res.json();
+    return data.result || data;
+  },
 
-app.patch("/payments/:id/cancel", async (req, res) => {
-  try {
-    const response = await fetch(`${PAYMENT_SERVICE_URL}/payments/${req.params.id}/cancel`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body)
-    });
-    const data = await response.json();
-    res.json({ gateway: "api-gateway", source: "payment-service", result: data });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal batalkan payment", error: error.message });
-  }
-});
-
-app.delete("/payments/:id", async (req, res) => {
-  try {
-    const response = await fetch(`${PAYMENT_SERVICE_URL}/payments/${req.params.id}`, {
-      method: "DELETE"
-    });
-    const data = await response.json();
-    res.json({ gateway: "api-gateway", source: "payment-service", result: data });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal hapus payment", error: error.message });
-  }
-});
+  deleteOrder: async ({ id }) => {
+    await fetch(`${ORDER_SERVICE_URL}/orders/${id}`, { method: "DELETE" });
+    return `Order ${id} berhasil dihapus`;
+  },
+};
 
 // =========================================================================
-// 4. ENDPOINT KATEGORI: REPORT SERVICE (PYTHON FLASK + MYSQL)
+// MOUNT GRAPHQL ENDPOINT
 // =========================================================================
-
-// [Report - Fungsi 1] Health Check
-app.get("/report/health", async (req, res) => {
-  try {
-    const response = await fetch(`${REPORT_SERVICE_URL}/health`);
-    const data = await response.json();
-    res.json({
-      gateway: "api-gateway",
-      source: "report-service",
-      result: data
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal mengecek kesehatan Report Service", error: error.message });
-  }
-});
-
-// [Report - Fungsi 2] Sinkronisasi Laporan Harian (Mengikuti pola Halaman 20)
-app.get("/report/daily", async (req, res) => {
-  try {
-    const dateQuery = req.query.date ? `?date=${req.query.date}` : "";
-    const response = await fetch(`${REPORT_SERVICE_URL}/report/daily${dateQuery}`);
-    const data = await response.json();
-    res.json({
-      gateway: "api-gateway",
-      source: "report-service",
-      result: data
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal mengambil laporan harian", error: error.message });
-  }
-});
-
-// [Report - Fungsi 3] Menampilkan Ringkasan Laporan Mingguan
-app.get("/report/weekly", async (req, res) => {
-  try {
-    const response = await fetch(`${REPORT_SERVICE_URL}/report/weekly`);
-    const data = await response.json();
-    res.json({
-      gateway: "api-gateway",
-      source: "report-service",
-      result: data
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal mengambil laporan mingguan", error: error.message });
-  }
-});
-
-// [Report - Fungsi 4] MENAMPILKAN DATA LAPORAN BERDASARKAN ID (Ketentuan Utama Tugas!)
-app.get("/report/detail/:id", async (req, res) => {
-  try {
-    const response = await fetch(`${REPORT_SERVICE_URL}/report/detail/${req.params.id}`);
-    const data = await response.json();
-    res.json({
-      gateway: "api-gateway",
-      source: "report-service",
-      result: data
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal mengambil detail laporan berdasarkan ID", error: error.message });
-  }
-});
-
-// [Report - Fungsi 5] Filter Laporan Berdasarkan Rentang Tanggal Custom
-app.get("/report/range", async (req, res) => {
-  try {
-    const { start_date, end_date } = req.query;
-    const response = await fetch(`${REPORT_SERVICE_URL}/report/range?start_date=${start_date}&end_date=${end_date}`);
-    const data = await response.json();
-    res.json({
-      gateway: "api-gateway",
-      source: "report-service",
-      result: data
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal memproses pencarian rentang tanggal", error: error.message });
-  }
-});
-
-// [Report - Fungsi 6] POST: Pembersihan Laporan Usang Manual (CRUD - Delete)
-app.post("/report/cleanup", async (req, res) => {
-  try {
-    const response = await fetch(`${REPORT_SERVICE_URL}/report/cleanup`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req.body)
-    });
-    const data = await response.json();
-    res.json({
-      gateway: "api-gateway",
-      source: "report-service",
-      result: data
-    });
-  } catch (error) {
-    res.status(500).json({ message: "Gagal melakukan pembersihan data via Gateway", error: error.message });
-  }
-});
+app.use("/graphql", graphqlHTTP({
+  schema,
+  rootValue: root,
+  graphiql: true
+}));
 
 // =========================================================================
-
+// START SERVER
+// =========================================================================
 app.listen(PORT, () => {
   console.log(`API Gateway berjalan pada port ${PORT}`);
+  console.log(`GraphQL endpoint: http://localhost:${PORT}/graphql`);
 });

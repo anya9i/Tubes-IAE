@@ -16,7 +16,7 @@ DB_PORT = os.getenv("DB_PORT", "5432")
 
 # URL service lain yang akan dipanggil
 ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL", "http://order-service:3001")
-PAYMENT_SERVICE_URL = os.getenv("PAYMENT_SERVICE_URL", "http://payment-service:3002")
+PAYMENT_SERVICE_URL = os.getenv("PAYMENT_SERVICE_URL", "http://payment-service:3004")  # FIX: port 3002 → 3004
 
 conn = None
 
@@ -41,7 +41,6 @@ def connect_with_retry(retries=20, delay=3):
 def init_database():
     cursor = conn.cursor()
     
-    # 1. Tabel laporan harian
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS daily_reports (
             id SERIAL PRIMARY KEY,
@@ -54,7 +53,6 @@ def init_database():
         )
     """)
     
-    # 2. Tabel menu populer
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS popular_menus (
             id SERIAL PRIMARY KEY,
@@ -101,19 +99,17 @@ def get_daily_report():
     try:
         date = request.args.get("date", datetime.now().strftime("%Y-%m-%d"))
 
-       
         order_data = fetch_json(f"{ORDER_SERVICE_URL}/orders")
         payment_data = fetch_json(f"{PAYMENT_SERVICE_URL}/payments")
 
-    
         order_list = order_data if isinstance(order_data, list) else (order_data.get("data", []) if order_data else [])
         payment_list = payment_data if isinstance(payment_data, list) else (payment_data.get("data", []) if payment_data else [])
 
         total_orders = len(order_list)
         total_transactions = len(payment_list)
-        total_revenue = sum(item.get("amount", 0) for item in payment_list)
+        total_revenue = sum(float(item.get("amount", 0)) for item in payment_list if isinstance(item, dict))  # FIX: float + isinstance guard
 
-        cursor = conn.cursor()
+        cursor = conn.cursor()  # FIX: cursor belum didefinisikan sebelumnya
         cursor.execute("""
             INSERT INTO daily_reports (report_date, total_orders, total_revenue, total_payments)
             VALUES (%s, %s, %s, %s)
@@ -121,7 +117,7 @@ def get_daily_report():
                 total_orders = EXCLUDED.total_orders,
                 total_revenue = EXCLUDED.total_revenue,
                 total_payments = EXCLUDED.total_payments
-        """, (date, total_orders, total_revenue, total_transactions))
+        """, (date, total_orders, int(total_revenue), total_transactions))
 
         conn.commit()
         cursor.close()
@@ -131,7 +127,7 @@ def get_daily_report():
             "date": date,
             "report": {
                 "total_orders": total_orders,
-                "total_revenue": total_revenue,
+                "total_revenue": int(total_revenue),
                 "total_payments": total_transactions
             }
         })
@@ -186,7 +182,7 @@ def get_weekly_report():
     except Exception as error:
         return jsonify({"message": "Gagal mengambil laporan mingguan", "error": str(error)}), 500
 
-# [METHOD 4] GET: Tampil Berdasarkan ID Laporan (Syarat Utama Kelompok)
+# [METHOD 4] GET: Tampil Berdasarkan ID Laporan
 @app.route("/report/detail/<int:report_id>", methods=["GET"])
 def get_report_by_id(report_id):
     try:
@@ -215,7 +211,7 @@ def get_report_by_id(report_id):
     except Exception as error:
         return jsonify({"message": "Gagal mengambil detail data", "error": str(error)}), 500
 
-# [METHOD 5] GET: Filter Berdasarkan Rentang Tanggal Custom (Fitur Pelengkap Presentasi)
+# [METHOD 5] GET: Filter Berdasarkan Rentang Tanggal Custom
 @app.route("/report/range", methods=["GET"])
 def get_report_by_range():
     try:
@@ -238,7 +234,7 @@ def get_report_by_range():
     except Exception as error:
         return jsonify({"message": "Gagal memproses rentang tanggal", "error": str(error)}), 500
 
-# [METHOD 6] POST: Fitur Pembersihan Laporan Usang Manual (CRUD - Delete Component)
+# [METHOD 6] POST: Fitur Pembersihan Laporan Usang Manual
 @app.route("/report/cleanup", methods=["POST"])
 def cleanup_old_reports():
     try:
@@ -259,7 +255,7 @@ def cleanup_old_reports():
     except Exception as error:
         return jsonify({"message": "Gagal melakukan pembersihan data", "error": str(error)}), 500
 
-# --- BLOCK RUNNER DI LETAKKAN DI LINK PALING BAWAH KODE ---
+# --- BLOCK RUNNER ---
 if __name__ == "__main__":
     connect_with_retry()
     init_database()
